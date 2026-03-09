@@ -2,18 +2,61 @@ package installs
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"github.com/nuonco/nuon/bins/cli/internal/lookup"
 	"github.com/nuonco/nuon/bins/cli/internal/ui"
+	"github.com/nuonco/nuon/bins/cli/internal/ui/bubbles"
 	"github.com/nuonco/nuon/bins/cli/internal/ui/v3/watch"
 	"github.com/nuonco/nuon/bins/cli/internal/ui/v3/workflow"
 	workflowselector "github.com/nuonco/nuon/bins/cli/internal/ui/v3/workflow/selector"
 	"github.com/nuonco/nuon/sdks/nuon-go/models"
 )
 
+// selectInstallID resolves an install ID by checking the flag, config, or showing
+// an interactive selector matching `installs select` behavior.
+func (s *Service) selectInstallID(ctx context.Context, installID string) (string, error) {
+	if installID == "" {
+		installID = s.GetInstallID()
+	}
+	if installID == "" {
+		var (
+			installs []*models.AppInstall
+			err      error
+		)
+
+		if s.cfg.AppID != "" {
+			installs, _, err = s.listAppInstalls(ctx, s.cfg.AppID, 0, 50)
+		} else {
+			installs, _, err = s.listInstalls(ctx, 0, 50)
+		}
+		if err != nil {
+			return "", err
+		}
+		if len(installs) == 0 {
+			return "", fmt.Errorf("no installs found, create one using installs create")
+		}
+
+		installOptions := make([]bubbles.InstallOption, len(installs))
+		for i, install := range installs {
+			installOptions[i] = bubbles.InstallOption{
+				ID:   install.ID,
+				Name: install.Name,
+			}
+		}
+
+		selectedID, err := bubbles.SelectInstall(installOptions, s.cfg.Interactive)
+		if err != nil {
+			return "", err
+		}
+		installID = selectedID
+	}
+	return lookup.InstallID(ctx, s.api, installID)
+}
+
 func (s *Service) workflowsTUI(ctx context.Context, installID, workflowID string) error {
-	installID, err := lookup.InstallID(ctx, s.api, installID)
+	installID, err := s.selectInstallID(ctx, installID)
 	if err != nil {
 		return ui.PrintError(err)
 	}
@@ -84,7 +127,11 @@ func (s *Service) WorkflowsWatchTUI(ctx context.Context, installID, workflowID s
 			return ExitCodeFailed, ui.PrintError(err)
 		}
 	} else {
-		return ExitCodeFailed, ui.PrintError(errors.New("either --install-id or --workflow-id is required"))
+		var err error
+		resolvedInstallID, err = s.selectInstallID(ctx, installID)
+		if err != nil {
+			return ExitCodeFailed, ui.PrintError(err)
+		}
 	}
 
 	exitCode := watch.WatchApp(ctx, s.cfg, s.api, resolvedInstallID)

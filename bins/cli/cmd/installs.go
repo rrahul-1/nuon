@@ -97,7 +97,6 @@ func (c *cli) installsCmd() *cobra.Command {
 		}),
 	}
 	createCmd.Flags().StringVarP(&appID, "app-id", "a", "", "The ID or name of the app to create this install for")
-	createCmd.MarkFlagRequired("app-id")
 	createCmd.Flags().StringVarP(&name, "name", "n", "", "The name you want to give this install")
 
 	if !c.cfg.Preview {
@@ -420,6 +419,28 @@ func (c *cli) installsCmd() *cobra.Command {
 	deprovisionInstallSandboxCmd.MarkFlagRequired("install-id")
 	installsCmds.AddCommand(deprovisionInstallSandboxCmd)
 
+	reprovisionInstallSandboxCmd := &cobra.Command{
+		Use:         "reprovision-sandbox",
+		Short:       "Reprovision install sandbox [preview]",
+		Long:        "Reprovision an install sandbox",
+		Annotations: tuiAnnotation(TUIAltScreen),
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := c.persistentPreRunE(cmd, args); err != nil {
+				return err
+			}
+			if !c.cfg.Preview {
+				return fmt.Errorf("[NUON_PREVIEW=false] reprovision-sandbox is a preview feature, set NUON_PREVIEW=true to enable")
+			}
+			return nil
+		},
+		Run: c.wrapCmd(func(cmd *cobra.Command, _ []string) error {
+			svc := installs.New(c.apiClient, c.cfg)
+			return svc.ReprovisionSandbox(cmd.Context(), id, PrintJSON)
+		}),
+	}
+	reprovisionInstallSandboxCmd.Flags().StringVarP(&id, "install-id", "i", "", "The ID of the install you want to use (shows selector if omitted)")
+	installsCmds.AddCommand(reprovisionInstallSandboxCmd)
+
 	workflowsCmd := &cobra.Command{
 		Use:   "workflows",
 		Short: "Manage workflows",
@@ -473,9 +494,10 @@ By default, launches an interactive TUI to view workflows.`,
 	workflowsCmd.AddCommand(workflowsGetCmd)
 
 	workflowsSelectCmd := &cobra.Command{
-		Use:   "select",
-		Short: "Select a workflow",
-		Long:  "Select a workflow to use as default for subsequent commands",
+		Use:         "select",
+		Short:       "Select a workflow",
+		Long:        "Select a workflow to use as default for subsequent commands",
+		Annotations: tuiAnnotation(TUIContextual),
 		Run: c.wrapCmd(func(cmd *cobra.Command, _ []string) error {
 			svc := installs.New(c.apiClient, c.cfg)
 			return svc.WorkflowsSelect(cmd.Context(), id, workflowID, offset, limit, PrintJSON)
